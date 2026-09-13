@@ -70,6 +70,57 @@ optimum.
 95% of the spend was re-reading a bloated context, and 5% was the compaction itself.
 Optimizing the summarizer is the wrong lever.
 
+## "But long tasks need long context"
+
+This is the usual objection to a tool that says compact at 107k instead of 267k, and it
+rests on a conflation worth separating:
+
+**Long-horizon work needs persistent state. That is not the same as a long context
+window.** The two got equated because the window is where state lived by default. Window
+size is a number on a spec sheet; effective length has to be measured.
+
+The measurements are unusually consistent:
+
+| finding | source |
+|---|---|
+| Models advertising 128k hold up to roughly **32k** before falling below baseline. At 128k, multi-key retrieval scores 20% and common-word extraction 0.8%. | [RULER](https://arxiv.org/abs/2404.06654) |
+| **18 of 18** frontier models degrade monotonically with input length — including on trivial text replication, with task difficulty held constant. One semantically similar distractor is enough to measurably lower accuracy. | [Context Rot](https://www.trychroma.com/research/context-rot) |
+| Structured memory scores **61.2%** against a full-context baseline's **55.0%**, using 95% fewer tokens per query. A 20B model with external memory beats its own full-context baseline by **44.6 points**. | [MAGMA](https://arxiv.org/pdf/2601.03236), [Hindsight](https://arxiv.org/pdf/2512.12818) |
+| Summary artifacts averaging **217 tokens** beat full **25,634-token** trajectories on task resolution. | [SWE Context Bench](https://arxiv.org/abs/2602.08316) |
+| Production agents rewrite the plan file to the *end* of context every turn, deliberately pushing the goal back into recent attention and out of the middle. | [Manus](https://manus.im/blog/Context-Engineering-for-AI-Agents-Lessons-from-Building-Manus) |
+
+### The strongest objection, and why it agrees
+
+On BrowseComp, **token usage alone explains 80% of performance variance**, and a
+multi-agent system beat single-agent Claude Opus 4 by 90.2% while burning ~15x the tokens
+([Anthropic](https://www.anthropic.com/engineering/multi-agent-research-system)). Spending
+tokens buys capability. That is real and it is not a small effect.
+
+But look at where those tokens went: across many short, focused subagent contexts, not
+down one long window. That sharpens the thesis instead of refuting it.
+
+> Total tokens spent buys capability. Context length spends them badly.
+
+### Where this genuinely breaks
+
+Externalization is a skill, not a free win.
+
+- **Compaction only helps when the right thing survives it.** Indiscriminate compaction and
+  free retrieval bring limited gains and can hurt outright
+  ([SWE Context Bench](https://arxiv.org/abs/2602.08316)).
+- **Splitting context fragments decisions.** Dispersed decision-making is a documented
+  failure mode — agents play telephone with whatever nobody wrote down
+  ([Cognition](https://cognition.com/blog/dont-build-multi-agents)).
+- **Open deliberation resists externalization.** Much of the value in a long design
+  discussion sits in the rejected branches and the reasons for rejecting them — precisely
+  what a summarizer drops while dutifully keeping the conclusion. Write those down as you
+  go, or keep the context.
+
+So the rule is not "short context good". It is: **anything you would be sad to lose
+should exist outside the context window.** Once that holds, the cheapest trigger point and
+the most accurate one are the same number — which is not how cost optimization usually
+goes.
+
 ## Method
 
 Full derivation, assumptions and validation in [`reference/model.md`](reference/model.md).
