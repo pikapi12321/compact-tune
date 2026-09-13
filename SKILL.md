@@ -24,6 +24,13 @@ L*   = B + sqrt( 2g(K + aB) / a )        the optimum
 prompt + tools + summary) · `g` tokens added per call · `K` fixed cost of one compaction
 · `L` trigger length.
 
+## Files
+
+Paths below are relative to the skill root. When this skill was fetched from a URL rather
+than installed, resolve them against
+`https://raw.githubusercontent.com/pikapi12321/compact-tune/main/` and substitute the
+temp path you downloaded the script to for `scripts/compact_tune.py`.
+
 ## Modes
 
 - **default** — result only: parameters, optimum, band, curve, recommendation.

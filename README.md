@@ -28,27 +28,26 @@ overspend on context, worth roughly $1,400 per month at that volume.
 
 Read-only. It never touches your agent's settings.
 
-## Install
+## Usage
 
-Copy `compact-tune/` into your agent's skills directory:
+You only need this answer once, so there is nothing to install. Paste this to your agent:
 
-- Claude Code — `~/.claude/skills/`
-- Other agents — wherever that agent loads skills from
+> Read https://github.com/pikapi12321/compact-tune — fetch `SKILL.md` and everything under
+> `reference/`, download `scripts/compact_tune.py` into a temp directory, then follow
+> SKILL.md to work out where I should be compacting my context.
 
-Then ask it: *"when should I be compacting?"*
+Your agent takes it from there: it asks which model you run on, looks up current token
+prices, samples your own transcripts, and reports the optimal trigger point.
 
-## Standalone use
+Nothing is installed and nothing persists. The script lands in a temp directory, reads
+your transcripts without writing to them, and never touches your agent's settings.
 
-The script runs on its own, no agent required. Python 3.9+, stdlib only.
+Claude Code transcripts are read out of the box and are the format validated against real
+billing. Any other agent that logs per-call token usage as JSONL works too — your agent
+will figure out the field mapping from SKILL.md. No usage history at all is fine: it falls
+back to measured workload profiles and tells you it did.
 
-```bash
-# measure your history
-python3 scripts/compact_tune.py sample --days 30 --out params.json
-
-# solve
-python3 scripts/compact_tune.py solve --params params.json \
-    --price-in 5 --price-out 25 --model "Claude Opus 5" --window 300000
-```
+## What you get back
 
 ```
   OPTIMAL TRIGGER        107,055 tok
@@ -66,28 +65,9 @@ python3 scripts/compact_tune.py solve --params params.json \
      267,440  #######################    $0.1053  +54.8%  <- current
 ```
 
-No history? Use a measured profile instead:
-
-```bash
-python3 scripts/compact_tune.py solve --preset coding-heavy --price-in 3 --price-out 15
-```
-
-## Other agents
-
-Claude Code transcripts work out of the box and are the format validated against real
-billing. Any other agent that logs JSONL with per-call token usage works through the
-generic adapter:
-
-```bash
-python3 scripts/compact_tune.py sample --source generic \
-  --root '~/.someagent/sessions/**/*.jsonl' \
-  --map input=usage.prompt_tokens,read=usage.cached_tokens,output=usage.completion_tokens
-```
-
-Field names are dotted paths into each JSON line. Recognized keys: `input`, `read`,
-`write_short`, `write_long`, `output`, `id`.
-
-Adapters for more agents are welcome — see `parse_claude_code` for the shape.
+Plus the parameters it measured, a recommendation, and the quality tradeoff that money
+alone does not capture — a tighter trigger means more compactions, and each one loses
+detail.
 
 ## Three results that surprise people
 
