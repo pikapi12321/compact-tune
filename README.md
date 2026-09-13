@@ -17,17 +17,6 @@ On a real 40,000-call coding corpus (Claude Opus 5, 98.5% cache hit rate), the o
 came out at **107k tokens** while the agent was actually compacting at **267k** — a 55%
 overspend on context, worth roughly $1,400 per month at that volume.
 
-## What it does
-
-1. Asks which model you run on and looks up current token prices.
-2. Samples your agent's own transcripts for growth rate, base context size, summary size
-   and cache hit rate.
-3. Solves for the optimal trigger, a ±3% tolerance band, and a cost curve.
-4. Reports the overspend of your current setting, plus the quality tradeoff that money
-   alone does not capture.
-
-Read-only. It never touches your agent's settings.
-
 ## Usage
 
 You only need this answer once, so there is nothing to install. Paste this to your agent:
@@ -42,10 +31,8 @@ prices, samples your own transcripts, and reports the optimal trigger point.
 Nothing is installed and nothing persists. The script lands in a temp directory, reads
 your transcripts without writing to them, and never touches your agent's settings.
 
-Claude Code transcripts are read out of the box and are the format validated against real
-billing. Any other agent that logs per-call token usage as JSONL works too — your agent
-will figure out the field mapping from SKILL.md. No usage history at all is fine: it falls
-back to measured workload profiles and tells you it did.
+Works on Claude Code transcripts out of the box, on any other agent that logs per-call
+token usage, and — with measured fallback profiles — on no history at all.
 
 ## What you get back
 
