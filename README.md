@@ -31,8 +31,18 @@ prices, samples your own transcripts, and reports the optimal trigger point.
 Nothing is installed and nothing persists. The script lands in a temp directory, reads
 your transcripts without writing to them, and never touches your agent's settings.
 
-Works on Claude Code transcripts out of the box, on any other agent that logs per-call
-token usage, and — with measured fallback profiles — on no history at all.
+Works on Claude Code and Codex transcripts out of the box, on any other agent that logs
+per-call token usage, and — with measured fallback profiles — on no history at all.
+
+Codex usage can be sampled without a field map:
+
+```bash
+python3 scripts/compact_tune.py sample --source codex --days 30 --out /tmp/params.json
+```
+
+The native parser handles both Codex rollout usage formats and recognizes automatic
+`ContextCompaction` boundaries, so post-compaction base size and observed trigger points
+come from the correct cycles.
 
 ## What you get back
 

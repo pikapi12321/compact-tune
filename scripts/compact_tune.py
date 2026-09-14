@@ -52,10 +52,10 @@ def pct(xs, p):
 class Call:
     __slots__ = ("ctx", "plain", "w_short", "w_long", "read", "out", "rid", "fresh")
 
-    def __init__(self, plain, w_short, w_long, read, out, rid):
+    def __init__(self, plain, w_short, w_long, read, out, rid, ctx=None):
         self.plain, self.w_short, self.w_long = plain, w_short, w_long
         self.read, self.out, self.rid = read, out, rid
-        self.ctx = plain + w_short + w_long + read
+        self.ctx = (plain + w_short + w_long + read) if ctx is None else ctx
         self.fresh = False  # first call of a cycle (session start or post-compact)
 
 
@@ -63,34 +63,35 @@ def parse_claude_code(path):
     """Claude Code / OpenClaw JSONL transcripts. Verified format."""
     seq = []
     try:
-        lines = open(path, encoding="utf-8", errors="replace").read().splitlines()
+        stream = open(path, encoding="utf-8", errors="replace")
     except OSError:
         return seq
-    for ln in lines:
-        if '"usage"' not in ln and "compact_boundary" not in ln:
-            continue
-        try:
-            d = json.loads(ln)
-        except ValueError:
-            continue
-        if d.get("isSidechain"):
-            continue
-        if d.get("subtype") == "compact_boundary":
-            m = d.get("compactMetadata") or {}
-            seq.append(("C", m.get("preTokens"), m.get("postTokens")))
-        elif d.get("type") == "assistant":
-            u = dig(d, "message.usage")
-            if not u:
+    with stream:
+        for ln in stream:
+            if '"usage"' not in ln and "compact_boundary" not in ln:
                 continue
-            cc = u.get("cache_creation") or {}
-            seq.append(("A", Call(
-                u.get("input_tokens", 0) or 0,
-                cc.get("ephemeral_5m_input_tokens", 0) or 0,
-                cc.get("ephemeral_1h_input_tokens", 0) or 0,
-                u.get("cache_read_input_tokens", 0) or 0,
-                u.get("output_tokens", 0) or 0,
-                d.get("requestId") or dig(d, "message.id"),
-            ), None))
+            try:
+                d = json.loads(ln)
+            except ValueError:
+                continue
+            if d.get("isSidechain"):
+                continue
+            if d.get("subtype") == "compact_boundary":
+                m = d.get("compactMetadata") or {}
+                seq.append(("C", m.get("preTokens"), m.get("postTokens")))
+            elif d.get("type") == "assistant":
+                u = dig(d, "message.usage")
+                if not u:
+                    continue
+                cc = u.get("cache_creation") or {}
+                seq.append(("A", Call(
+                    u.get("input_tokens", 0) or 0,
+                    cc.get("ephemeral_5m_input_tokens", 0) or 0,
+                    cc.get("ephemeral_1h_input_tokens", 0) or 0,
+                    u.get("cache_read_input_tokens", 0) or 0,
+                    u.get("output_tokens", 0) or 0,
+                    d.get("requestId") or dig(d, "message.id"),
+                ), None))
     return seq
 
 
@@ -98,22 +99,97 @@ def parse_generic(path, fmap):
     """Any JSONL where each line may carry a usage record, via --map dotted paths."""
     seq = []
     try:
-        lines = open(path, encoding="utf-8", errors="replace").read().splitlines()
+        stream = open(path, encoding="utf-8", errors="replace")
     except OSError:
         return seq
-    for ln in lines:
-        try:
-            d = json.loads(ln)
-        except ValueError:
-            continue
-        raw = {k: dig(d, p) for k, p in fmap.items()}
-        if raw.get("read") is None and raw.get("input") is None:
-            continue
-        seq.append(("A", Call(
-            raw.get("input") or 0, raw.get("write_short") or 0,
-            raw.get("write_long") or 0, raw.get("read") or 0,
-            raw.get("output") or 0, raw.get("id"),
-        ), None))
+    with stream:
+        for ln in stream:
+            try:
+                d = json.loads(ln)
+            except ValueError:
+                continue
+            raw = {k: dig(d, p) for k, p in fmap.items()}
+            if raw.get("read") is None and raw.get("input") is None:
+                continue
+            seq.append(("A", Call(
+                raw.get("input") or 0, raw.get("write_short") or 0,
+                raw.get("write_long") or 0, raw.get("read") or 0,
+                raw.get("output") or 0, raw.get("id"),
+            ), None))
+    return seq
+
+
+def _codex_call(usage, rid):
+    """Convert Codex's total-input usage into the component fields we model."""
+    total = max(0, int(usage.get("input_tokens", 0) or 0))
+    if not total:
+        return None
+    read = max(0, min(total, int(usage.get("cached_input_tokens", 0) or 0)))
+    write = max(0, min(total - read,
+                       int(usage.get("cache_write_input_tokens", 0) or 0)))
+    plain = total - read - write
+    return Call(plain, write, 0, read,
+                int(usage.get("output_tokens", 0) or 0), rid, ctx=total)
+
+
+def parse_codex(path):
+    """Codex rollout JSONL, including legacy token_count records.
+
+    Newer rollouts contain token_usage_record entries as well as token_count
+    events. The latter are retained only for their ContextCompaction markers so
+    usage is not double-counted. Older rollouts have token_count only.
+    """
+    primary, legacy, boundaries, explicit_boundaries = [], [], [], []
+    saw_primary = False
+    try:
+        stream = open(path, encoding="utf-8", errors="replace")
+    except OSError:
+        return []
+    with stream:
+        for line_no, ln in enumerate(stream):
+            if ("token_usage_record" not in ln and "token_count" not in ln
+                    and "ContextCompaction" not in ln):
+                continue
+            try:
+                d = json.loads(ln)
+            except ValueError:
+                continue
+            ordinal = d.get("ordinal", line_no)
+            if d.get("type") == "token_usage_record":
+                usage = dig(d, "payload.usage") or {}
+                call = _codex_call(usage, dig(d, "payload.response_id"))
+                saw_primary = True
+                if call:
+                    primary.append((ordinal, "A", call, None))
+                continue
+            if d.get("type") != "event_msg":
+                continue
+            payload = d.get("payload") or {}
+            if payload.get("type") == "token_count":
+                info = payload.get("info") or {}
+                usage = info.get("last_token_usage") or {}
+                if int(usage.get("input_tokens", 0) or 0) <= 0:
+                    boundaries.append((ordinal, "C", None,
+                                       info.get("model_context_window")))
+                else:
+                    call = _codex_call(usage, None)
+                    if call:
+                        legacy.append((ordinal, "A", call, None))
+            elif (payload.get("type") == "item_completed"
+                  and (payload.get("item") or {}).get("type") == "ContextCompaction"):
+                explicit_boundaries.append((ordinal, "C", None, None))
+
+    events = primary if saw_primary else legacy
+    markers = boundaries or explicit_boundaries
+    events = sorted(events + markers, key=lambda item: item[0])
+    seq, prev = [], None
+    for _, kind, value, _window in events:
+        if kind == "C":
+            seq.append(("C", prev.ctx if prev else None, None))
+            prev = None
+        else:
+            seq.append(("A", value, None))
+            prev = value
     return seq
 
 
@@ -125,7 +201,14 @@ def sample(args):
                      "--map input=usage.prompt_tokens,read=usage.cached_tokens,output=usage.completion_tokens")
         fmap = dict(kv.split("=", 1) for kv in args.map.split(","))
 
-    roots = args.root or (["~/.claude/projects/*/*.jsonl"] if args.source == "claude-code" else [])
+    if args.root:
+        roots = args.root
+    elif args.source == "claude-code":
+        roots = ["~/.claude/projects/*/*.jsonl"]
+    elif args.source == "codex":
+        roots = ["~/.codex/sessions/**/*.jsonl"]
+    else:
+        roots = []
     files = []
     cutoff = time.time() - args.days * 86400
     for pat in roots:
@@ -140,7 +223,12 @@ def sample(args):
     n_calls = n_compact = 0
 
     for f in files:
-        seq = parse_claude_code(f) if args.source == "claude-code" else parse_generic(f, fmap)
+        if args.source == "claude-code":
+            seq = parse_claude_code(f)
+        elif args.source == "codex":
+            seq = parse_codex(f)
+        else:
+            seq = parse_generic(f, fmap)
         # collapse retries / streaming duplicates sharing one request id
         flat, prev_id = [], object()
         for kind, a, b in seq:
@@ -349,7 +437,8 @@ def main():
     sub = ap.add_subparsers(dest="cmd", required=True)
 
     s = sub.add_parser("sample", help="measure parameters from agent transcripts")
-    s.add_argument("--source", default="claude-code", choices=["claude-code", "generic"])
+    s.add_argument("--source", default="claude-code",
+                   choices=["claude-code", "codex", "generic"])
     s.add_argument("--root", action="append", help="glob for transcript files (repeatable)")
     s.add_argument("--map", help="generic source field map, dotted paths: "
                                  "input=,read=,write_short=,write_long=,output=,id=")

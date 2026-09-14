@@ -63,6 +63,17 @@ Defaults to Claude Code transcripts (`~/.claude/projects/*/*.jsonl`), the one fo
 verified against real billing. For another agent, point at its JSONL and map the usage
 fields:
 
+Codex rollouts are supported directly, including both native usage-record formats and
+automatic `ContextCompaction` boundaries:
+
+```bash
+python3 scripts/compact_tune.py sample --source codex --days 30 --out /tmp/params.json
+```
+
+The Codex source reads `~/.codex/sessions/**/*.jsonl`, avoids double-counting its
+legacy and current usage events, and resets each measurement cycle after compaction.
+Use `--root` to point it at another Codex session store.
+
 ```bash
 python3 scripts/compact_tune.py sample --source generic \
   --root '~/.codex/sessions/**/*.jsonl' \
